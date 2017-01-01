@@ -8,31 +8,67 @@
 
 #include "Joystick.h"
 
-bool changed = false;
-bool button0 = false;
-
 //Pin connected to latch pin (ST_CP) of 74HC595
-const int latchPin = 5;
+#define latchPin 5
 //Pin connected to clock pin (SH_CP) of 74HC595
-const int clockPin = 6;
+#define clockPin 6
 ////Pin connected to Data in (DS) of 74HC595
-const int dataPin = 4;
+#define dataPin 4
 
+#define width 4
+#define height 2
 const int col[2] = {2,3};  
 
-bool switchState[ 4 ][ 2 ];
+bool switchState[ width ][ height ];
 
 #define SWITCH_OFF 0
 #define SWITCH_ON 1 << 0
 #define SWTICH_SHOULD_RELEASE 1 << 1
- 
+
 void resetSwitchStates()
 {
-  memset( switchState, 0, sizeof( switchState ) );
+  memset( switchState, SWITCH_OFF, sizeof( switchState ) );
 }
 
-void setup() {
- 
+void setShouldRelease( int c, int r, bool enable=true )
+{
+  if( enable )
+    switchState[c][r] |= SWTICH_SHOULD_RELEASE;
+  else
+    switchState[c][r] &= ~SWTICH_SHOULD_RELEASE;
+}
+
+void setSwitchActive( int c, int r, bool active=true )
+{
+  if( active )
+    switchState[c][r] |= SWITCH_ON;
+  else
+    switchState[c][r] &= ~SWITCH_ON;
+}
+
+
+void registerWrite(int whichPin, int whichState) 
+{
+  // the bits you want to send
+  byte bitsToSend = 0;
+
+  // turn off the output so the pins don't light up
+  // while you're shifting bits:
+  digitalWrite(latchPin, LOW);
+
+  // turn on the next highest bit in bitsToSend:
+  bitWrite(bitsToSend, whichPin, whichState);
+
+  // shift the bits out:
+  shiftOut(dataPin, clockPin, MSBFIRST, bitsToSend);
+
+    // turn on the output so the LEDs can light up:
+  digitalWrite(latchPin, HIGH);
+
+}
+
+void setup() 
+{ 
   Joystick.begin();
   
   //set pins to output because they are addressed in the main loop
@@ -41,8 +77,8 @@ void setup() {
   pinMode(clockPin, OUTPUT);
 
   // input columns
-  pinMode( col[0], INPUT );
-  pinMode( col[1], INPUT );
+  pinMode( col[0], OUTPUT );
+  pinMode( col[1], OUTPUT );
 
   // debug/configuration serial 
   Serial.begin(9600);
@@ -51,51 +87,78 @@ void setup() {
   resetSwitchStates();
 }
 
-bool updateInput( int c, int r )
+// update the status of a single switch
+// converts switch throw to momentary button press
+//
+bool updateInput( int c, int r, bool input )
 {
-  bool state = digitalRead( 3 ) > 0;
+  bool state = switchState[c][r] & SWITCH_ON;
+  bool shouldRelease = switchState[c][r] & SWTICH_SHOULD_RELEASE;
 
-  changed = state != button0;
-  button0 = state;
+  int button = (r*width+c)+1;
+  bool changed = input != state;
 
   if (changed)
   {
-    Joystick.pressButton(1);
-    //Joystick.sendState();
-    shouldRelease = true; 
-    delay(100);
+    setSwitchActive( c, r, input );
+    Joystick.pressButton(button);
+    setShouldRelease(c,r);
+
+    Serial.print('p');
+    Serial.println(button);
+    
+    return true;
   }
-  else if( shouldRelease )
+  
+  if( shouldRelease )
   {
-    Joystick.releaseButton(1);
-    Joystick.sendState();
+    Joystick.releaseButton(button);
+    setShouldRelease(c,r, false);
+    
+    Serial.print('r');
+    Serial.println(button);
+    
+    return true;
   }
+
+  return false;
 }
 
-bool shouldRelease = false;
+// scan all column/rows and update switch states
+//
+bool updateInputs()
+{
+  bool sendState = false;
+  
+   // put your main code here, to run repeatedly:
+  for( int w = 0; w < width; ++w )
+  {
+    //digitalWrite( 7, HIGH );
+    registerWrite( w+1, HIGH );
+    for( int h = 0; h < height; ++h )
+    {
+      digitalWrite(col[h], LOW);
+      pinMode( col[h], INPUT_PULLUP );
+      //Serial.println( w + h );
+      bool set = digitalRead( col[h] );
+
+      pinMode( col[h], OUTPUT );
+      digitalWrite(col[h], HIGH);
+      
+      sendState |= updateInput( w, h, set );
+      delay(100);
+    }
+  }
+
+  return sendState;
+}
+
 void loop() {
 
-  bool state = digitalRead( 3 ) > 0;
-
-  changed = state != button0;
-  button0 = state;
-
-  
-  
-  if (changed)
+  bool sendUpdate = updateInputs();
+  if( sendUpdate) 
   {
-    Joystick.pressButton(1);
-    Joystick.sendState();
-    shouldRelease = true;
-    delay(100);
-  }
-  else if( shouldRelease )
-  {
-    Joystick.releaseButton(1);
     Joystick.sendState();
   }
-    
-    
- 
 }
 
