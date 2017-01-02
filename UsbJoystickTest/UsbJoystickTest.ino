@@ -1,11 +1,5 @@
-// Program used to test the USB Joystick object on the 
-// Arduino Leonardo or Arduino Micro.
-//
-// Matthew Heironimus
-// 2015-03-28
-// Updated on 2015-11-18 to use the new Joystick library written for version 1.6.6.
-//------------------------------------------------------------
-
+// Used to control an input panel an look like a joystick
+// via HID to the operating system
 #include "Joystick.h"
 
 //Pin connected to latch pin (ST_CP) of 74HC595
@@ -17,39 +11,23 @@
 
 #define width 4
 #define height 2
-const int col[2] = {2,3};  
+const int col[2] = {2, 3};
 
-bool switchState[ width ][ height ];
+#define RELEASE_DELAY_START 1
+#define RELEASE_DELAY 10
 
-#define SWITCH_OFF 0
-#define SWITCH_ON 1 << 0
-#define SWITCH_SHOULD_RELEASE 1 << 1
+bool switchState[ width * height ];
+char shouldRelease[ width * height];
 
 char buf[16];
 
 void resetSwitchStates()
 {
-  memset( switchState, SWITCH_OFF, sizeof( switchState ) );
+  memset( switchState, 0, sizeof( switchState ) );
+  memset( shouldRelease, 0, sizeof( shouldRelease ) );
 }
 
-void setShouldRelease( int c, int r, bool enable=true )
-{
-  if( enable )
-    switchState[c][r] |= SWITCH_SHOULD_RELEASE;
-  else
-    switchState[c][r] &= ~SWITCH_SHOULD_RELEASE;
-}
-
-void setSwitchActive( int c, int r, bool active=true )
-{
-  if( active )
-    switchState[c][r] |= SWITCH_ON;
-  else
-    switchState[c][r] &= ~SWITCH_ON;
-}
-
-
-void registerWrite(int whichPin, int whichState) 
+void registerWrite(int whichPin, int whichState)
 {
   // the bits you want to send
   byte bitsToSend = 0;
@@ -64,25 +42,25 @@ void registerWrite(int whichPin, int whichState)
   // shift the bits out:
   shiftOut(dataPin, clockPin, MSBFIRST, bitsToSend);
 
-    // turn on the output so the LEDs can light up:
+  // turn on the output so the LEDs can light up:
   digitalWrite(latchPin, HIGH);
 
 }
 
-void setup() 
-{ 
+void setup()
+{
   Joystick.begin();
-  
+
   //set pins to output because they are addressed in the main loop
   pinMode(latchPin, OUTPUT);
-  pinMode(dataPin, OUTPUT);  
+  pinMode(dataPin, OUTPUT);
   pinMode(clockPin, OUTPUT);
 
   // input columns
   pinMode( col[0], OUTPUT );
   pinMode( col[1], OUTPUT );
 
-  // debug/configuration serial 
+  // debug/configuration serial
   Serial.begin(9600);
   Serial.println("reset");
 
@@ -94,41 +72,51 @@ void setup()
 //
 bool updateInput( int c, int r, bool input )
 {
-  bool state = switchState[c][r] & SWITCH_ON;
-  bool shouldRelease = switchState[c][r] & SWITCH_SHOULD_RELEASE;
+  int button = (r * width + c) + 1;
 
-  int button = (r*width+c)+1;
+  bool state = switchState[button];
   bool changed = input != state;
 
   if (changed)
   {
-    switchState[c][r] = input | SWITCH_SHOULD_RELEASE;
-    
+    switchState[button] = input;
+    shouldRelease[button] = RELEASE_DELAY_START;
+
     Joystick.pressButton(button);
 
-    Serial.print('p');
-    Serial.print(state);
-    Serial.print(',');
-    Serial.print( input);
-    Serial.print(',');
-    Serial.println(button);
-    
-    return true;
-  }
-  
-  if( shouldRelease )
-  {
-    Joystick.releaseButton(button);
-    setShouldRelease(c,r, false);
-    
-    Serial.print('r');
-    sprintf( buf, "%X", state );
-    Serial.print(buf);
-    Serial.println(button);
-    
+//    Serial.print('p');
+//    Serial.print(state);
+//    Serial.print(',');
+//    Serial.print( input);
+//    Serial.print(",[");
+//    Serial.print(c);
+//    Serial.print(',');
+//    Serial.print(r);
+//    Serial.print("],");
+//    Serial.println(button);
+//
     return true;
   }
 
+  // wait 5 iterations
+  if( shouldRelease[button] > 0 )
+  {
+    if ( ++shouldRelease[button] > RELEASE_DELAY  )
+    {
+      shouldRelease[button] = 0;
+      
+      Joystick.releaseButton(button);
+      
+  //    Serial.print('r');
+  //    sprintf( buf, "%X", state );
+  //    Serial.print(buf);
+  //    Serial.println(button);
+  
+      return true;
+    }
+  }
+
+//  delay(100);
   return false;
 }
 
@@ -137,22 +125,29 @@ bool updateInput( int c, int r, bool input )
 bool updateInputs()
 {
   bool sendState = false;
-  
-   // put your main code here, to run repeatedly:
-  for( int w = 0; w < width; ++w )
+
+  // put your main code here, to run repeatedly:
+  for ( int w = 0; w < width; ++w )
   {
     //digitalWrite( 7, HIGH );
-    registerWrite( w+1, HIGH );
-    for( int h = 0; h < height; ++h )
+    registerWrite( w + 1, HIGH );
+
+//    if ( w == 0 )
+//      Serial.println("====================");
+//    Serial.print(w);
+//    Serial.println(" ---");
+
+    delay(2);
+    for ( int h = 0; h < height; ++h )
     {
       //digitalWrite(col[h], LOW);
       pinMode( col[h], INPUT );
       //Serial.println( w + h );
-      bool set = digitalRead( col[h] );
+      bool set = (bool)digitalRead( col[h] );
 
       //pinMode( col[h], OUTPUT );
       //digitalWrite(col[h], HIGH);
-      
+
       sendState |= updateInput( w, h, set );
       //delay(10);
     }
@@ -164,7 +159,7 @@ bool updateInputs()
 void loop() {
 
   bool sendUpdate = updateInputs();
-  if( sendUpdate) 
+  if ( sendUpdate)
   {
     Joystick.sendState();
   }
