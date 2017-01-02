@@ -23,7 +23,9 @@ bool switchState[ width ][ height ];
 
 #define SWITCH_OFF 0
 #define SWITCH_ON 1 << 0
-#define SWTICH_SHOULD_RELEASE 1 << 1
+#define SWITCH_SHOULD_RELEASE 1 << 1
+
+char buf[16];
 
 void resetSwitchStates()
 {
@@ -33,9 +35,9 @@ void resetSwitchStates()
 void setShouldRelease( int c, int r, bool enable=true )
 {
   if( enable )
-    switchState[c][r] |= SWTICH_SHOULD_RELEASE;
+    switchState[c][r] |= SWITCH_SHOULD_RELEASE;
   else
-    switchState[c][r] &= ~SWTICH_SHOULD_RELEASE;
+    switchState[c][r] &= ~SWITCH_SHOULD_RELEASE;
 }
 
 void setSwitchActive( int c, int r, bool active=true )
@@ -93,18 +95,22 @@ void setup()
 bool updateInput( int c, int r, bool input )
 {
   bool state = switchState[c][r] & SWITCH_ON;
-  bool shouldRelease = switchState[c][r] & SWTICH_SHOULD_RELEASE;
+  bool shouldRelease = switchState[c][r] & SWITCH_SHOULD_RELEASE;
 
   int button = (r*width+c)+1;
   bool changed = input != state;
 
   if (changed)
   {
-    setSwitchActive( c, r, input );
+    switchState[c][r] = input | SWITCH_SHOULD_RELEASE;
+    
     Joystick.pressButton(button);
-    setShouldRelease(c,r);
 
     Serial.print('p');
+    Serial.print(state);
+    Serial.print(',');
+    Serial.print( input);
+    Serial.print(',');
     Serial.println(button);
     
     return true;
@@ -116,6 +122,8 @@ bool updateInput( int c, int r, bool input )
     setShouldRelease(c,r, false);
     
     Serial.print('r');
+    sprintf( buf, "%X", state );
+    Serial.print(buf);
     Serial.println(button);
     
     return true;
@@ -137,16 +145,16 @@ bool updateInputs()
     registerWrite( w+1, HIGH );
     for( int h = 0; h < height; ++h )
     {
-      digitalWrite(col[h], LOW);
-      pinMode( col[h], INPUT_PULLUP );
+      //digitalWrite(col[h], LOW);
+      pinMode( col[h], INPUT );
       //Serial.println( w + h );
       bool set = digitalRead( col[h] );
 
-      pinMode( col[h], OUTPUT );
-      digitalWrite(col[h], HIGH);
+      //pinMode( col[h], OUTPUT );
+      //digitalWrite(col[h], HIGH);
       
       sendState |= updateInput( w, h, set );
-      delay(100);
+      //delay(10);
     }
   }
 
